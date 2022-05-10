@@ -31,6 +31,6 @@ Reach out to rspoone@mediafly.com for clarity and general questions.
 
 You will need to reference the following API documentation:
 
-Required: [nedb](https://www.npmjs.com/package/nedb)
-Recommended: [lodash - general utility functions](https://lodash.com/docs/4.17.15)
-Recommended: [await the - async-await utility functions](https://www.npmjs.com/package/await-the#api-reference)
+Required: https://www.npmjs.com/package/nedb
+Recommended: https://lodash.com/docs/4.17.15
+Recommended: https://www.npmjs.com/package/await-the#api-reference
