@@ -64,4 +64,6 @@ appspec.yml
 # test report
 test/summary_report.md
 
+*.zip
+
 .DS_Store

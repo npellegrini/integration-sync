@@ -118,14 +118,46 @@ const read = async name => {
  */
 const syncAllNoLimit = async () => {
     // TODO
+    const mySourceData = await sourceDb.find()
+    await targetDb.insert(mySourceData)
 }
 
 
 /**
  * Sync up to the provided limit of records.
  */
+
+// I am using cursor based pagination, basically because with it we can increase our performance due to how it's works
+// Queries  in the database that use a cursor instead of offset pagination, has a better performance, 
+// because the WHERE clause helps skip unwanted rows, while OFFSET needs to iterate over them, and the results is a full-table scan
 const syncWithLimit = async (limit, data) => {
-    // TODO
+
+    let cursor = (!!data.nextCursor) ? data.nextCursor : null
+    let mySourceDataPaginated
+    if (cursor) {
+        mySourceDataPaginated = await sourceDb.find({
+            _id: {
+                $lte: cursor
+            }
+        })
+        
+    } else {
+        mySourceDataPaginated = await sourceDb.find({})
+            .sort({_id: -1})
+            .limit(limit + 1)
+    }
+    const hasMore = mySourceDataPaginated.length === limit + 1
+    let nextCursor = null
+    if (hasMore) {
+        const nextCursorRecord = mySourceDataPaginated[limit]
+        nextCursor = nextCursorRecord._id
+        mySourceDataPaginated.pop()
+    }
+    await targetDb.insert(mySourceDataPaginated)
+
+    data.hasMore = hasMore
+    data.nextCursor = nextCursor
+    
     return data;
 }
 
@@ -139,9 +171,9 @@ const syncAllSafely = async (batchSize, data) => {
         data = {}
     }
 
-    data.lastResultSize = -1;
+    data.hasMore = true;
     await the.while(
-        () => data.lastResultSize != 0,
+        () => data.hasMore,
         async () => await syncWithLimit(batchSize, data)
     );
 
@@ -153,9 +185,46 @@ const syncAllSafely = async (batchSize, data) => {
  * Sync changes since the last time the function was called with
  * with the passed in data.
  */
+
+// Here we have alternatives ways to do this. 
+// 1- Now we are using a function to check after an amount of time if some document was changed in a period of time,
+// and then if something new comes up we sync we the target database.
+// 2- Another alternative to do it, is building a change stream event to detect events and react immediately after some actions happend
+// 3- Using triggers to react to database events
 const syncNewChanges = async data => {
     // TODO
+    const dateDecreasedObj = getTimeDecreasedByMlS(3000)
+
+    const docsChanged = await sourceDb.find({
+        updatedAt:{
+            $gt: dateDecreasedObj
+        }
+    })
+    if (docsChanged.length === 0) {
+        console.log("Nothing to update");
+        return data
+    }
+    for (const iterator of docsChanged) {
+        //Case update doc
+        let wasUpdated = await targetDb.update({_id: iterator._id}, iterator)
+        //Case new doc
+        if (wasUpdated === 0) {
+            await targetDb.insert(iterator)
+        }
+        //If we have a case that there was a deleted documents we should see 
+        //another way to do it, at least that the deletion was made logically
+
+    }
+
     return data;
+}
+
+const getTimeDecreasedByMlS = (mlsToDecrease) => {
+    const currentDateObj = new Date();
+    const numberOfMlSeconds = currentDateObj.getTime();
+    const addMlSeconds = mlsToDecrease;
+
+    return new Date(numberOfMlSeconds - addMlSeconds);
 }
 
 
@@ -165,7 +234,26 @@ const syncNewChanges = async data => {
  */
 const synchronize = async () => {
     // TODO
+    await load();
+    const sourceDocs = await sourceDb.find({})
+    const targetDocs = await targetDb.find({})
+
+    // Case: has never been updated before
+    if (sourceDocs.length > 0 && targetDocs.length === 0 ) {
+        
+        // await syncAllNoLimit();
+
+        //To syncronize dbs using batches
+        await syncAllSafely(2);
+    }else{
+        await the.wait(3000);
+        await touch('GE');
+        await read('GE');
+        await syncNewChanges()
+    }
+    
 }
+
 
 
 /**
@@ -181,6 +269,7 @@ const runTest = async () => {
     EVENTS_SENT = 0;
     await syncAllNoLimit();
 
+    
     // TODO: Maybe use something other than logs to validate use cases?
     // Something like `mocha` with `assert` or `chai` might be good libraries here.
     if (EVENTS_SENT === TOTAL_RECORDS) {
@@ -193,7 +282,6 @@ const runTest = async () => {
     if (EVENTS_SENT === TOTAL_RECORDS) {
         console.log('2. synchronized correct number of events')
     }
-
     // Make some updates and then sync just the changed files.
     EVENTS_SENT = 0;
     await the.wait(300);
@@ -208,5 +296,5 @@ const runTest = async () => {
 // TODO:
 // Call synchronize() instead of runTest() when you have synchronize working
 // or add it to runTest().
-runTest();
-// synchronize();
+// runTest();
+synchronize();
